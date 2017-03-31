@@ -51,10 +51,9 @@ public class ObjectTree extends JScrollPane {
 		}
 	}
 
-	public ObjectTree(MemoryReader mr, long address) {
+	public ObjectTree(MemoryReader mr, PyObject rootObj) {
 		// Create root and tree
-		PyObject val = mr.getObject(address);
-		ObjectNode root = new ObjectNode(null, val);
+		ObjectNode root = new ObjectNode(null, rootObj);
 
 		populateNode(mr, root);
 		JTree jt = new JTree(root);
