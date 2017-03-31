@@ -1,7 +1,12 @@
 package com.bluesun212.pylon;
-import java.lang.reflect.Constructor;
-import java.util.LinkedList;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.LinkedList;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import com.bluesun212.pylon.types.PyObject;
 import com.sun.jna.Memory;
 import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.Kernel32;
@@ -14,11 +19,12 @@ import com.sun.jna.platform.win32.WinNT.MEMORY_BASIC_INFORMATION;
 import com.sun.jna.ptr.IntByReference;
 
 /**
- * The MemoryReader is the base class for Pylon.  It attaches to the specified process,
- * and scans for user-specified data.  In more detail, it does the following:
- * 1. Opens a process with the given PID, and obtains its handle
- * 2. Makes a list of all memory regions in the process (COMMIT + any variation of READ)
- * 3. After scanFor() is called, all memory regions are scanned for any aligned ints that are in the specified array.
+ * The MemoryReader is the base class for Pylon. It attaches to the specified
+ * process, and scans for user-specified data. In more detail, it does the
+ * following: 1. Opens a process with the given PID, and obtains its handle 2.
+ * Makes a list of all memory regions in the process (COMMIT + any variation of
+ * READ) 3. After scanFor() is called, all memory regions are scanned for any
+ * aligned ints that are in the specified array.
  * 
  * @author Jared Jonas
  */
@@ -26,12 +32,28 @@ public class MemoryReader {
 	private HANDLE proc;
 	private LinkedList<MemoryModel> regions;
 	private Reader reader;
+
+	private static int bufferSize = 8;
+	private Buffer[] buffers;
+	private int current;
+	private Object lock;
 	
+	private static final Method readMethod;
+	static {
+		try {
+			readMethod = PyObject.class.getDeclaredMethod("read", MemoryReader.class, long.class);
+			readMethod.setAccessible(true);
+		} catch (NoSuchMethodException | SecurityException e) {
+			throw new RuntimeException(e);
+		}
+	}
+
 	/**
 	 * Takes a string that matches the window's title and creates a MemoryReader
 	 * that is attached to the underlying process the window is running from.
 	 * 
-	 * @param window a string matching the window's title
+	 * @param window
+	 *            a string matching the window's title
 	 * @return a MemoryReader instance
 	 */
 	public static MemoryReader attach(String window) {
@@ -40,17 +62,18 @@ public class MemoryReader {
 		User32.INSTANCE.GetWindowThreadProcessId(hwnd, ibr);
 		return new MemoryReader(ibr.getValue());
 	}
-	
+
 	/**
 	 * Attaches a new instance of MemoryReader to the specified process
 	 * 
-	 * @param processId the PID
+	 * @param processId
+	 *            the PID
 	 * @return a MemoryReader instance
 	 */
 	public static MemoryReader attach(int processId) {
 		return new MemoryReader(processId);
 	}
-	
+
 	private MemoryReader(int processId) {
 		// Get min/max application addresses
 		SYSTEM_INFO info = new SYSTEM_INFO();
@@ -59,7 +82,8 @@ public class MemoryReader {
 		long max = Pointer.nativeValue(info.lpMaximumApplicationAddress);
 
 		// Open child process
-		proc = Kernel32.INSTANCE.OpenProcess(Kernel32.PROCESS_QUERY_INFORMATION | Kernel32.PROCESS_VM_READ, false, processId);
+		proc = Kernel32.INSTANCE.OpenProcess(Kernel32.PROCESS_QUERY_INFORMATION | Kernel32.PROCESS_VM_READ, false,
+				processId);
 
 		// Start going through memory pages
 		regions = new LinkedList<MemoryModel>();
@@ -74,71 +98,69 @@ public class MemoryReader {
 			long regionSize = mbi.regionSize.longValue();
 
 			// If region matches the specified parameters
-			if (mbi.state.intValue() == Kernel32.MEM_COMMIT &&
-				(mbi.protect.intValue() == Kernel32.PAGE_READONLY ||
-				mbi.protect.intValue() == Kernel32.PAGE_READWRITE ||
-				mbi.protect.intValue() == Kernel32.PAGE_EXECUTE_READ ||
-				mbi.protect.intValue() == Kernel32.PAGE_EXECUTE_READWRITE)) {
+			if (mbi.state.intValue() == Kernel32.MEM_COMMIT && (mbi.protect.intValue() == Kernel32.PAGE_READONLY
+					|| mbi.protect.intValue() == Kernel32.PAGE_READWRITE
+					|| mbi.protect.intValue() == Kernel32.PAGE_EXECUTE_READ
+					|| mbi.protect.intValue() == Kernel32.PAGE_EXECUTE_READWRITE)) {
 				regions.add(new MemoryModel(minAddress, mbi));
 			}
 
 			// Jump to next region
 			min += regionSize;
 		}
+
+		// Create buffer stuff
+		buffers = new Buffer[bufferSize];
+		for (int i = 0; i < bufferSize; i++) {
+			buffers[i] = new Buffer();
+		}
+
+		lock = new Object();
+		current = 0;
 	}
-	
+
 	/**
 	 * Creates a reader corresponding to the input class.
 	 * 
-	 * @param version the reader class
+	 * @param version
+	 *            the reader class
 	 * @return whether the call succeeded
 	 */
 	public boolean createReader(Class<? extends Reader> version) {
 		try {
-			Constructor<? extends Reader> ctor = version.getDeclaredConstructor(HANDLE.class);
+			Constructor<? extends Reader> ctor = version.getDeclaredConstructor(MemoryReader.class);
 			ctor.setAccessible(true);
-			
-			reader = ctor.newInstance(proc);
+
+			reader = ctor.newInstance(this);
 			return true;
 		} catch (Exception e) {
 			reader = null;
 			return false;
 		}
 	}
-	
-	/**
-	 * Returns a Reader matching the specified Python version.
-	 * 
-	 * @return a Reader instance
-	 */
-	public Reader getReader() {
-		if (reader == null) {
-			throw new RuntimeException("MemoryReader.createReader has not been called!");
-		}
-		
-		return reader;
-	}
-	
+
 	/**
 	 * Takes an array of integer values and finds all occurrences in the memory.
 	 * 
-	 * @param arr the input values
+	 * @param arr
+	 *            the input values
 	 * @return a list of addresses
 	 */
 	public LinkedList<Long> scanFor(int[] arr) {
 		LinkedList<Long> ret = new LinkedList<Long>();
-		
+
 		for (MemoryModel region : regions) {
 			region.find(arr, ret);
 		}
-		
+
 		return ret;
 	}
-	
+
 	/**
 	 * Takes a list of integer values and finds all occurrences in the memory.
 	 * 
-	 * @param list the input values
+	 * @param list
+	 *            the input values
 	 * @return a list of addresses
 	 */
 	public LinkedList<Long> scanFor(LinkedList<Integer> list) {
@@ -146,40 +168,163 @@ public class MemoryReader {
 		for (int i = 0; i < list.size(); i++) {
 			arr[i] = list.get(i);
 		}
-		
+
 		return scanFor(arr);
 	}
 	
+	public PyObject getObject(long address) {
+		return getObject(address, null);
+	}
+
+	public PyObject getObject(long address, String expectedType) {
+		// Instantiate object
+		PyObject inst = reader.createTypeInstance(address, expectedType);
+		if (inst == null) {
+			return null;
+		}
+
+		try {
+			// Set the object
+			// TODO: Combine these into one function
+			boolean success = reader.readObjectHead(address, inst);
+			if (success) {
+				success &= (boolean) readMethod.invoke(inst, this, address);
+			}
+
+			// The object wasn't valid, fail silently, otherwise return
+			if (success) {
+				return inst;
+			}
+		} catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
+				| SecurityException e) {
+			// Something didn't work with the reflection (which is unusual), so
+			// raise a RuntimeException
+			throw new RuntimeException(e);
+		}
+
+		return null;
+	}
+
+	public Buffer getBuffer() {
+		synchronized (lock) {
+			// Find an unused buffer
+			int old = current;
+
+			do {
+				current = (current + 1) % buffers.length;
+			} while (buffers[current].lock.get() && current != old);
+
+			// If all are used, create a new one
+			Buffer b = buffers[current];
+			if (current == old) {
+				System.err.println("New buffer created");
+				new Throwable().printStackTrace(System.err);
+				b = new Buffer();
+			}
+
+			// Lock and return
+			b.lock.set(true);
+			return b;
+		}
+	}
+
+	public Memory getExtendedBuffer(long address, int size) {
+		Memory buffer = new Memory(size);
+		Kernel32.INSTANCE.ReadProcessMemory(proc, Pointer.createConstant(address), buffer, size, null);
+		return buffer;
+	}
+
+	/**
+	 * Reads a null-terminated string at the specified memory address.
+	 * 
+	 * @param address
+	 *            the address of the string
+	 * @param maxLength
+	 *            its max length
+	 * @return a string the address pointed to
+	 */
+	public String readNTString(long address, int maxLength) {
+		try {
+			Memory buffer = new Memory(maxLength);
+			Kernel32.INSTANCE.ReadProcessMemory(proc, Pointer.createConstant(address), buffer, maxLength, null);
+			String name = buffer.getString(0);
+
+			if (name.length() > maxLength) {
+				name = name.substring(0, maxLength);
+			}
+
+			return name;
+		} catch (Error e) {
+			return "";
+		}
+	}
+
+	/**
+	 * Reads a null-terminated string at the specified memory address, with a
+	 * max length of 64 bytes.
+	 * 
+	 * @param address
+	 *            the address of the string
+	 * @return a string the address pointed to
+	 */
+	public String readNTString(long address) {
+		return readNTString(address, 64);
+	}
+
+	public class Buffer {
+		private Memory back;
+		private AtomicBoolean lock;
+
+		public Buffer() {
+			back = new Memory(4);
+			lock = new AtomicBoolean();
+		}
+
+		public int read(long address) {
+			Kernel32.INSTANCE.ReadProcessMemory(proc, Pointer.createConstant(address), back, 4, null);
+			return back.getInt(0);
+		}
+
+		public void unlock() {
+			lock.set(false);
+		}
+		
+		@Override
+		protected void finalize() {
+			unlock();
+		}
+	}
+
 	private class MemoryModel {
 		private Pointer address;
 		private int regionSize;
-		
+
 		public MemoryModel(Pointer address, MEMORY_BASIC_INFORMATION mbi) {
 			this.address = address;
-			
+
 			regionSize = mbi.regionSize.intValue();
 		}
-		
+
 		public void find(int[] arr, LinkedList<Long> ret) {
 			// Read memory
 			if (regionSize == 0) {
 				return;
 			}
-			
+
 			Memory m = new Memory(regionSize);
 			IntByReference ibr = new IntByReference();
 			Kernel32.INSTANCE.ReadProcessMemory(proc, address, m, regionSize, ibr);
 			int readSize = ibr.getValue();
-			
+
 			if (readSize < regionSize) {
 				String addr = Long.toHexString(Pointer.nativeValue(address));
-				System.out.println("Region size ("+regionSize+") != read size ("+readSize+"): "+addr);
+				System.out.println("Region size (" + regionSize + ") != read size (" + readSize + "): " + addr);
 				regionSize = readSize;
 			}
-			
+
 			// Interpret data
 			int[] vals = m.getIntArray(0, regionSize / 4);
-			
+
 			for (int i = 1; i < vals.length; i++) {
 				for (int x = 0; x < arr.length; x++) {
 					if (arr[x] == vals[i]) {

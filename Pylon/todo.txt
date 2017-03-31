@@ -1,0 +1,8 @@
+Validate data structures
+Improve Reader.create code
+Add more to Utils and type classes
+Remove gui.icons, replace with hard-coded icons using 5 longs per icon
+Create auto-update node feature in ObjectTree
+JavaDoc
+
+Work on a way to modify and create objects

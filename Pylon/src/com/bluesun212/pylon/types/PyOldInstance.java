@@ -1,30 +1,19 @@
 package com.bluesun212.pylon.types;
 
-import java.util.HashMap;
-
-/**
- * 
- * @author Jared Jonas
- */
-public class PyOldInstance {
-	private String type;
-	private HashMap<Integer, Integer> dict;
+public abstract class PyOldInstance extends PyObject {
+	protected PyOldClass classobj;
+	protected PyDict dict;
 	
-	public PyOldInstance(String type, HashMap<Integer, Integer> dict) {
-		this.type = type;
-		this.dict = dict;
+	public PyOldClass getClassObject() {
+		return classobj;
 	}
 	
-	public String getType() {
-		return type;
-	}
-	
-	public HashMap<Integer, Integer> getDict() {
+	public PyDict getDict() {
 		return dict;
 	}
 	
-	
+	@Override
 	public String toString() {
-		return "Instance of " + type;
+		return "Old instance of " + classobj.getName();
 	}
 }

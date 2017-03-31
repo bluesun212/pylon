@@ -1,6 +1,6 @@
 package com.bluesun212.pylon.types;
 
-public class PyType {
+public abstract class PyType extends PyObject {
 	protected long addr;
 	protected String name;
 	protected String docs;
@@ -13,7 +13,9 @@ public class PyType {
 	protected int tp_call;
 	protected int tp_string;
 	
-	protected PyType() {}
+	public PyType() {
+		
+	}
 	
 	public long getAddress() {
 		return addr;
@@ -29,15 +31,5 @@ public class PyType {
 	
 	public int getDictOffset() {
 		return dictOffset;
-	}
-	
-	@Override
-	public boolean equals(Object other) {
-		if (!(other instanceof PyType)) {
-			return false;
-		}
-		
-		PyType obj = (PyType) other;
-		return obj.getName().equals(name);
 	}
 }
