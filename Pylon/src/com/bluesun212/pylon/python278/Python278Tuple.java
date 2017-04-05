@@ -5,10 +5,10 @@ import java.util.List;
 
 import com.bluesun212.pylon.MemoryReader;
 import com.bluesun212.pylon.MemoryReader.Buffer;
-import com.bluesun212.pylon.types.PyList;
 import com.bluesun212.pylon.types.PyObject;
+import com.bluesun212.pylon.types.PyTuple;
 
-class Python278Tuple extends PyList {
+class Python278Tuple extends PyTuple {
 	private LinkedList<Integer> addrList;
 	private MemoryReader mr;
 	
@@ -38,6 +38,17 @@ class Python278Tuple extends PyList {
 		mem.unlock();
 		return true;
 	}
+	
+	@Override
+	public boolean update() {
+		// Tuples are immutable, so they'll never change
+		return true;
+	}
+
+	@Override
+	public int size() {
+		return addrList.size();
+	}
 
 	@Override
 	public List<PyObject> get() {
@@ -48,5 +59,4 @@ class Python278Tuple extends PyList {
 		
 		return list;
 	}
-
 }

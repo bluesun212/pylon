@@ -6,23 +6,10 @@ import java.util.Map.Entry;
 
 import com.bluesun212.pylon.ObjectFilter;
 
-public abstract class PyDict extends PyObject implements PyReadable<Map<PyObject, PyObject>> {
+public abstract class PyDict extends PyObject implements PyReadable<Map<PyObject, PyObject>>, PyDataStructure {
 	protected Map<Integer, Integer> dict;
 	
-	public int size() {
-		return dict.size();
-	}
-	
-	public PyObject getPyObject(String val) {
-		Map<PyObject, PyObject> map = get();
-		for (Entry<PyObject, PyObject> pair : map.entrySet()) {
-			if (pair.getKey().toString().equals(val)) {
-				return pair.getValue();
-			}
-		}
-		
-		return null;
-	}
+	public abstract PyObject getPyObject(String val);
 	
 	public Object getObject(String val, Object def) {
 		PyObject pobj = getPyObject(val);

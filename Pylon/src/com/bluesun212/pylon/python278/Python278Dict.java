@@ -16,16 +16,27 @@ class Python278Dict extends PyDict {
 	@Override
 	protected boolean read(MemoryReader mr, long address) {
 		this.mr = mr;
-		return doRead();
+		return update();
 	}
-
-	private boolean doRead() {
-		// Read size and table ptr
+	
+	@Override
+	public int size() {
 		Buffer mem = mr.getBuffer();
 		int size = mem.read(address+16) * 12;
+		mem.unlock();
+		
+		return size;
+	}
+
+	@Override
+	public boolean update() {
+		int size = size();
+		
+		// Read table ptr
+		Buffer mem = mr.getBuffer();
 		int table = mem.read(address+20);
 		mem.unlock();
-
+		
 		// TODO: Validate in a better way
 		if (size < 0 || size > 40000) {
 			return false;
@@ -55,7 +66,7 @@ class Python278Dict extends PyDict {
 
 	@Override
 	public Map<PyObject, PyObject> get() {
-		doRead();
+		update();
 		
 		HashMap<PyObject, PyObject> objDict = new HashMap<PyObject, PyObject>();
 		for (Entry<Integer, Integer> pair : dict.entrySet()) {
@@ -70,4 +81,18 @@ class Python278Dict extends PyDict {
 		return objDict;
 	}
 
+	@Override
+	public PyObject getPyObject(String val) {
+		update();
+		
+		for (Entry<Integer, Integer> pair : dict.entrySet()) {
+			PyObject key = mr.getObject(pair.getKey());
+
+			if (key != null && key.toString().equals(val)) {
+				return mr.getObject(pair.getValue());
+			}
+		}
+
+		return null;
+	}
 }

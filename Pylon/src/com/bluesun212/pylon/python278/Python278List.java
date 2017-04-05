@@ -15,13 +15,23 @@ class Python278List extends PyList {
 	@Override
 	protected boolean read(MemoryReader mr, long address) {
 		this.mr = mr;
-		return doRead();
+		return update();
 	}
 	
-	private boolean doRead() {
-		// Read list size
+	@Override
+	public int size() {
 		Buffer mem = mr.getBuffer();
 		int size = mem.read(address+8);
+		mem.unlock();
+		
+		return size;
+	}
+	
+	@Override
+	public boolean update() {
+		// Read list size
+		Buffer mem = mr.getBuffer();
+		int size = size();
 		
 		// Read list address
 		int listAddr = mem.read(address+12);
@@ -47,7 +57,7 @@ class Python278List extends PyList {
 
 	@Override
 	public List<PyObject> get() {
-		doRead();
+		update();
 		
 		LinkedList<PyObject> list = new LinkedList<PyObject>();
 		for (int i = 0; i < addrList.size(); i++) {
@@ -56,5 +66,4 @@ class Python278List extends PyList {
 		
 		return list;
 	}
-
 }
