@@ -30,53 +30,70 @@ To view all the data in a data structure or a type object, one can create a new 
 ### New in version 2
 ###### CHANGES
 `PyObject`:
-	got rid of setHead and read, and used a constructor instead
-	This is because most types are immutable, so read would 
-	only be called once anyways.  
-	changed getReferenceCount to readReferenceCount, since they are dynamic
-	All subclasses of PyObject were updated to reflect this
+* Got rid of `setHead` and `read`, and used a constructor instead
+	* This is because most types are immutable, so read would only be called once anyways.  
+* Changed `getReferenceCount` to `readReferenceCount`, since they are dynamic
+* All subclasses of `PyObject` were updated to reflect this
 
-`PyDict`: added an abstract function to get multiple objects 
+`PyDict`: Added an abstract function to get multiple objects 
+
 `PyOldClass`: Added `getBaseObjects()` and `toString()`
-`PYType`: added `membersAddr`,` tp_hash`, `tp_getattro`, `tp_setattro`, `mro` fields and more getters
 
-`Py278Dict`: `size()`: Fixed an error that returned the wrong number
-	`update()`: size uses the mask+1 instead of the size() func
-		reading from the table has been improved slightly
-`Python278OldClass`: the dict is now read in, and the initialization is more robust
-`Python278String`: converts byte array to a string using ISO-8859-1 encoding now
-`Python278Type`: fixed some read offsets that were incorrect
+`PYType`: Added `membersAddr`,` tp_hash`, `tp_getattro`, `tp_setattro`, `mro` fields and more getters
+
+`Py278Dict`: 
+* `size()`: Fixed an error that returned the wrong number
+* `update()`: size uses the `mask+1` instead of the `size()` func
+* Reading from the table has been improved slightly
+
+`Python278OldClass`: The dict is now read in, and the initialization is more robust
+
+`Python278String`: Converts byte array to a string using ISO-8859-1 encoding now
+
+`Python278Type`: Fixed some read offsets that were incorrect
 
 `ObjectTree`: Moved some functionality into ObjectNode
+
 `Utils`: Methods that required a base type address argument now use `MemoryInterface.getBaseTypeAddress()`
-`Reader/PyInterface`: Renamed to `PyInterface`
-	`readObjectHead` and `createTypeInstance` have been removed in favor of a new system,
-	which is simply `getObject()`.  
+
+`Reader/PyInterface`: 
+* Renamed to `PyInterface`
+* `readObjectHead` and `createTypeInstance` have been removed in favor of a new system, which is simply `getObject()`.  
+
 `Python278`: More robust type checking and validation has been implemented
-`MemoryReader/MemoryInterface`: Renamed to `MemoryInterface`
-	`getBuffer()` has been simplified
-	`getObject(long, String)` has been removed
-	`createReader()` was renamed to `setVersion()`
-	
+
+`MemoryReader/MemoryInterface`:
+* Renamed to `MemoryInterface`
+* `getBuffer()` has been simplified
+* `getObject(long, String)` has been removed
+* `createReader()` was renamed to `setVersion()`
 
 ###### ADDITIONS
-`MemoryInterface`: Added `ExtendedBuffer`, and changed `getExtendedBuffer()` to return this
-	This way these buffers can be disposed of when done with
-	Reflects this change: `Python278Dict`, `Python278Float`, `Python278String`
-	Added `Buffer.write()`, `getMemoryAllocator()`, `getFactory()`
-		`getProcessID()`, `getProcessHandle()`
-	added `get/setBaseTypeAddress()`, since this address was important to `Utils`
+`MemoryInterface`: 
+* Added `ExtendedBuffer`, and changed `getExtendedBuffer()` to return this
+	*This way these buffers can be disposed of when done with
+* Added `Buffer.write()`, `getMemoryAllocator()`, `getFactory()`
+`getProcessID()`, `getProcessHandle()`
+* Added `get/setBaseTypeAddress()`, since this address was important to `Utils`
 
 `ObjectTree`: Added a context menu and began work on an auto update feature
+
 `ObjectFilter`: Added `PassAllFilter`
-`PyInterface`: `createFactory()`, `getFactory()`, and `validateBaseType()` have been added
-	an `ObjectAllocator` field has been added
+
+`PyInterface`: 
+* `createFactory()`, `getFactory()`, and `validateBaseType()` have been added
+* An `ObjectAllocator` field has been added
+
 `Python278`: `implementedTypes` and `TypeFactory` now controls the instantiation of objects
 
 Added `PyCode`, representing a code object
+
 Added `PyFunction`, representing a function object
+
 Added `MemoryAllocator`, a class that manages blocks of memory in the attached process
+
 Added `ObjectAllocator`, a class that manages garbage collection of python objects
 	residing in the `MemoryBlock`s allocated by `MemoryAllocator`
+	
 Added `ObjectFactory`, which will construct specific types in the process' memory
 	and return a `PyObject` pointing to it
