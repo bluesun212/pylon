@@ -1,32 +1,33 @@
 package com.bluesun212.pylon.types;
 
-import com.bluesun212.pylon.MemoryReader;
+import com.bluesun212.pylon.MemoryInterface;
+import com.bluesun212.pylon.MemoryInterface.Buffer;
 
 public abstract class PyObject {
-	protected int refCount;
 	protected long address;
 	protected PyType type;
+	protected MemoryInterface base;
 	
-	public PyObject() {
-		
-	}
-	
-	public void setHead(int refCount, long address, PyType type) {
-		if (this.address == 0) {
-			this.refCount = refCount;
-			this.address = address;
-			this.type = type;
+	protected PyObject(MemoryInterface base, long address, PyType type) {
+		if (address == 0) {
+			throw new IllegalArgumentException("Address is NULL, cannot create object");
 		}
+		
+		this.base = base;
+		this.address = address;
+		this.type = type;
 	}
-	
-	protected abstract boolean read(MemoryReader mr, long address);
 	
 	public long getAddress() {
 		return address;
 	}
 	
-	public int getReferenceCount() {
-		return refCount;
+	public int readReferenceCount() {
+		Buffer b = base.getBuffer();
+		int refCnt = b.read(address);
+		b.unlock();
+		
+		return refCnt;
 	}
 	
 	public PyType getType() {

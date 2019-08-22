@@ -2,112 +2,208 @@ package com.bluesun212.pylon.python278;
 
 import java.util.HashMap;
 
-import com.bluesun212.pylon.MemoryReader;
-import com.bluesun212.pylon.Reader;
-import com.bluesun212.pylon.MemoryReader.Buffer;
+import com.bluesun212.pylon.MemoryInterface;
+import com.bluesun212.pylon.PyInterface;
+import com.bluesun212.pylon.MemoryInterface.Buffer;
+import com.bluesun212.pylon.ObjectAllocator;
 import com.bluesun212.pylon.types.PyObject;
 import com.bluesun212.pylon.types.PyType;
 
-/* TODO LIST:
- * 	Custom Tuple, List, Dict types
- *  Add more fields in PyType
- *  Create old class and instance types
- */
 /**
  * A subclass of Reader that is able to read memory from a compiled Python 2.7.8 x86 program.
  * 
  * @author Jared Jonas
  */
-public class Python278 extends Reader {
-	public Python278(MemoryReader mr) {
-		super(mr);
+public class Python278 extends PyInterface {
+	private static HashMap<String, TypeFactory> implementedTypes = new HashMap<String, TypeFactory>();
+	
+	private HashMap<Integer, PyType> typeCache;
+	private int baseTypeAddr;
+	
+	public Python278(MemoryInterface mi) {
+		super(mi);
+		
+		typeCache = new HashMap<Integer, PyType>();
+		baseTypeAddr = 0;
 	}
 	
 	@Override
-	public PyObject createTypeInstance(long address, String expectedType) {
-		if (address == 0) {
-			return null;
+	protected void createFactory() {
+		alloc = new ObjectAllocator(base, this);
+		factory = new Python278ObjectFactory(base, alloc);
+	}
+	
+	static {
+		implementedTypes.put("bool", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Bool(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("dict", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Dict(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("float", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Float(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("int", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Integer(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("list", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278List(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("object", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Object(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("classobj", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278OldClass(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("instance", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278OldInstance(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("str", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278String(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("tuple", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Tuple(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("type", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Type(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("function", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Function(base, address, type);
+			}
+		});
+		
+		implementedTypes.put("code", new TypeFactory() {
+			public PyObject construct(MemoryInterface base, long address, PyType type) {
+				return new Python278Code(base, address, type);
+			}
+		});
+	}
+	
+	@Override
+	public PyObject getObject(long address) {
+		//System.out.println(Long.toHexString(address));
+		if (baseTypeAddr == 0) {
+			throw new IllegalArgumentException("Base type address is NULL");
 		}
 		
-		// Get type string
-		Buffer b = mr.getBuffer();
+		if (address == 0) {
+			throw new IllegalArgumentException("Address is NULL");
+		}
+		
+		// Read type address
+		Buffer b = base.getBuffer();
+		int refCnt = b.read(address);
 		int typeAddr = b.read(address+4);
-		int strAddr = b.read(typeAddr+12);
 		b.unlock();
 		
-		String typeStr = mr.readNTString(strAddr);
-		if (typeStr == null || (expectedType != null && !typeStr.equals(expectedType))) {
-			return null;
+		if (refCnt <= 0 || typeAddr == 0) {
+			throw new IllegalArgumentException("Type address is NULL or ref count is negative");
 		}
 		
-		// Get class
-		if (typeStr.equals("bool")) {
-			return new Python278Bool();
-		} else if (typeStr.equals("dict")) {
-			return new Python278Dict();
-		} else if (typeStr.equals("float")) {
-			return new Python278Float();
-		} else if (typeStr.equals("int")) {
-			return new Python278Integer();
-		} else if (typeStr.equals("list")) {
-			return new Python278List();
-		} else if (typeStr.equals("classobj")) {
-			return new Python278OldClass();
-		} else if (typeStr.equals("instance")) {
-			return new Python278OldInstance();
-		} else if (typeStr.equals("str")) {
-			return new Python278String();
-		} else if (typeStr.equals("tuple")) {
-			return new Python278Tuple();
-		} else if (typeStr.equals("type")) {
-			return new Python278Type();
-		} else if (typeStr.equals("object")) {
-			return new Python278Object();
+		// Get type instance
+		PyType type = typeCache.get(typeAddr);
+		if (type == null) {
+			if (!checkType(typeAddr, "type")) {
+				throw new IllegalArgumentException("Object type's type is not base type");
+			}
+			
+			// Add type to the type cache
+			type = (PyType) getObject(typeAddr);
+			typeCache.put(typeAddr, type);
 		}
 		
-		// Check if it's an instance
-		PyObject typeObj = mr.getObject(typeAddr, "type");
-		
-		if (typeObj instanceof PyType) {
-			PyType type = (PyType) typeObj;
+		TypeFactory tf = implementedTypes.get(type.getName());
+		PyObject ret = null;
+		if (tf != null) {
+			ret = tf.construct(base, address, type);
+		} else { // Check if this is an instance
 			if (type.getDictOffset() > 0) {
-				Buffer mem = mr.getBuffer();
+				Buffer mem = base.getBuffer();
 				int dictAddr = mem.read(address + type.getDictOffset());
 				mem.unlock();
 				
-				if (dictAddr > 0) {
-					return new Python278TypeInstance(dictAddr);
+				if (dictAddr != 0 && checkType(dictAddr, "dict")) {
+					ret = new Python278TypeInstance(base, address, type, dictAddr);
 				}
 			}
 		}
 		
-		return new Python278Object();
+		if (ret == null) {
+			ret = new Python278Object(base, address, type);
+		}
+		
+		return ret;
 	}
 	
-	private HashMap<Long, PyType> typeCache = new HashMap<Long, PyType>();
-
-	public boolean readObjectHead(long address, PyObject inst) {
-		Buffer b = mr.getBuffer();
-		int refCount = b.read(address);
-		int typeAddr = b.read(address+4);
-		b.unlock();
-		
-		PyObject typeObj = typeCache.get(address);
-		if (typeObj == null) {
-			if (typeAddr != address) {
-				typeObj = mr.getObject(typeAddr, "type");
-			} else {
-				typeObj = inst;
-			}
+	@Override
+	public boolean validateBaseType(long addr) {
+		if (addr > 0) {
+			Buffer m = base.getBuffer();
+			int typeAddr = m.read(addr+4);
+			m.unlock();
 			
-			if (typeObj instanceof PyType) {
-				typeCache.put(address, (PyType) typeObj);
-			} else {
-				return false;
+			if (addr == typeAddr && checkType((int) addr, "type")) {
+				baseTypeAddr = (int) addr;
+				PyType type = new Python278Type(base, baseTypeAddr, null);
+				typeCache.put(baseTypeAddr, type);
+				return true;
 			}
 		}
 		
-		inst.setHead(refCount, address, (PyType) typeObj);
-		return true;
+		return false;
+	}
+	
+	private boolean checkType(int objAddr, String expectedType) {
+		Buffer m = base.getBuffer();
+		int objRefCnt = m.read(objAddr);
+		int typeAddr = m.read(objAddr+4);
+		int typeRefCnt = m.read(typeAddr);
+		int nameAddr = m.read(typeAddr+12);
+		m.unlock();
+		
+		if (objAddr == 0 || typeAddr == 0 || nameAddr == 0 
+				|| objRefCnt <= 0 || typeRefCnt <= 0) {
+			return false;
+		}
+		
+		return base.readNTString(nameAddr).equals(expectedType);
+	}
+	
+	private static interface TypeFactory {
+		public abstract PyObject construct(MemoryInterface base, long address, PyType type);
 	}
 }

@@ -1,64 +1,65 @@
 package com.bluesun212.pylon.gui;
 
 import java.awt.Component;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.util.Comparator;
 import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
 
 import javax.swing.BorderFactory;
-import javax.swing.Icon;
-import javax.swing.ImageIcon;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JTree;
-import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.Timer;
 import javax.swing.tree.DefaultTreeCellRenderer;
-import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
-import com.bluesun212.pylon.MemoryReader;
-import com.bluesun212.pylon.Utils;
-import com.bluesun212.pylon.types.PyBool;
-import com.bluesun212.pylon.types.PyDict;
-import com.bluesun212.pylon.types.PyFloat;
-import com.bluesun212.pylon.types.PyInteger;
-import com.bluesun212.pylon.types.PyList;
+import com.bluesun212.pylon.MemoryInterface;
 import com.bluesun212.pylon.types.PyObject;
-import com.bluesun212.pylon.types.PyOldInstance;
-import com.bluesun212.pylon.types.PyString;
-import com.bluesun212.pylon.types.PyTuple;
-import com.bluesun212.pylon.types.PyTypeInstance;
 
 /* TODO List:
- * different font weight on desc.
  * enable/disable auto update on object
  */
 public class ObjectTree extends JScrollPane {
 	private static final long serialVersionUID = -3461047263728757683L;
-	private static final Icon[] ICONS;
-	
-	static {
-		String[] filenames = { "bool", "dict", "dict2", "float", "int", "list", "list2", "oldinst", "oldinst2", "str",
-				"tuple", "tuple2", "typeinst", "typeinst2" };
 
-		ICONS = new Icon[filenames.length];
-		for (int i = 0; i < filenames.length; i++) {
-			ICONS[i] = new ImageIcon(ObjectTree.class.getResource("icons/" + filenames[i] + ".png"),
-					"type: " + filenames[i]);
-		}
-	}
+	private MemoryInterface mr;
+	JTree jt;
+	private LinkedList<ObjectNode> autoUpdateNodes = new LinkedList<ObjectNode>();
 
-	public ObjectTree(MemoryReader mr, PyObject rootObj) {
+
+	public ObjectTree(MemoryInterface mr, PyObject rootObj) {
+		this.mr = mr;
+		
+		Timer autoUpdateTimer = new Timer(500, new ActionListener() {
+			public void actionPerformed(ActionEvent arg0) {
+				LinkedList<ObjectNode> removed = new LinkedList<ObjectNode>();
+				for (ObjectNode node : autoUpdateNodes) {
+					if (!node.onAutoUpdate()) {
+						removed.add(node);
+					}
+				}
+				
+				autoUpdateNodes.removeAll(removed);
+			}
+		});
+		
+		autoUpdateTimer.setRepeats(true);
+		autoUpdateTimer.start();
+		
+
 		// Create root and tree
-		ObjectNode root = new ObjectNode(null, rootObj);
-
-		populateNode(mr, root);
-		JTree jt = new JTree(root);
+		ObjectNode root = new ObjectNode(null, null, rootObj);
+		jt = new JTree(root);
+		root.setTree(jt);
+		
 		jt.setCellRenderer(new Renderer());
-
 		jt.addMouseListener(new MouseAdapter() {
 			public void mouseClicked(MouseEvent me) {
 				// Get node where clicked
@@ -68,95 +69,23 @@ public class ObjectTree extends JScrollPane {
 				}
 
 				ObjectNode node = (ObjectNode) tp.getLastPathComponent();
-				
-				// Get address when right-clicked
+
+				// Show context menu when right-clicked
 				if (me.getButton() == MouseEvent.BUTTON3) {
-					PyObject obj = node.val;
-					System.out.println(Long.toHexString(obj.getAddress()));
-					return;
-				}
-
-				// Expand or contract nodes
-				if (node.isLeaf()) {
-					populateNode(mr, node);
-					jt.expandPath(tp);
+					new ItemMenu(node).show(me.getComponent(), me.getX(), me.getY());
 				} else {
-					node.removeAllChildren();
+					// Expand or contract nodes
+					if (node.isLeaf()) {
+						node.populate();
+					} else {
+						node.close();
+					}
 				}
-
-				((DefaultTreeModel) jt.getModel()).nodeStructureChanged(node);
 			}
 		});
 
 		setViewportView(jt);
-	}
-
-	private void populateNode(MemoryReader mr, ObjectNode parent) {
-		PyObject obj = parent.val;
-
-		PyDict dict = null;
-		if (obj instanceof PyTypeInstance) { // Instance of a type object
-			PyTypeInstance pti = (PyTypeInstance) obj;
-			dict = pti.getDict();
-		}
-
-		if (obj instanceof PyOldInstance) { // Instance of an old class
-			PyOldInstance poi = (PyOldInstance) obj;
-			dict = poi.getDict();
-		}
-
-		if (obj instanceof PyDict) {
-			dict = (PyDict) obj;
-		}
-
-		// Sort the corresponding pairs
-		if (dict != null) {
-			LinkedList<ObjectNode> sl = new LinkedList<ObjectNode>();
-
-			Map<PyObject, PyObject> map = dict.get();
-			for (Entry<PyObject, PyObject> pair : map.entrySet()) {
-				PyObject key = pair.getKey();
-				PyObject val = pair.getValue();
-				sl.add(new ObjectNode(key, val));
-			}
-
-			sl.sort(new Comparator<ObjectNode>() {
-				public int compare(ObjectNode arg0, ObjectNode arg1) {
-					return arg0.parent.toString().compareTo(arg1.parent.toString());
-				}
-			});
-
-			// Create the nodes
-			for (ObjectNode node : sl) {
-				parent.add(node);
-			}
-		}
-
-		// Lists and tuples
-		if (obj instanceof PyList) {
-			List<PyObject> list = ((PyList) obj).get();
-			for (PyObject val : list) {
-				parent.add(new ObjectNode(null, val));
-			}
-		}
-
-		if (obj instanceof PyTuple) {
-			List<PyObject> list = ((PyTuple) obj).get();
-			for (PyObject val : list) {
-				parent.add( new ObjectNode(null, val));
-			}
-		}
-	}
-
-	private class ObjectNode extends DefaultMutableTreeNode {
-		private static final long serialVersionUID = -2972977079916062555L;
-		private PyObject val;
-		private PyObject parent;
-
-		public ObjectNode(PyObject parent, PyObject val) {
-			this.val = val;
-			this.parent = parent;
-		}
+		root.populate();
 	}
 
 	private class Renderer extends DefaultTreeCellRenderer {
@@ -165,61 +94,63 @@ public class ObjectTree extends JScrollPane {
 		public Component getTreeCellRendererComponent(JTree tree, Object value, boolean sel, boolean expanded,
 				boolean leaf, int row, boolean hasFocus) {
 			super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
-
-			// Choose behavior based on object
+			
 			ObjectNode node = (ObjectNode) value;
-			PyObject obj = node.val;
-
-			int icon = 0;
-			int size = -1;
-			if (obj instanceof PyBool) {
-				icon = 0;
-			} else if (obj instanceof PyDict) {
-				icon = 1;
-				size = Utils.getDict(obj).size();
-			} else if (obj instanceof PyFloat) {
-				icon = 3;
-			} else if (obj instanceof PyInteger) {
-				icon = 4;
-			} else if (obj instanceof PyList) {
-				icon = 5;
-				size = ((PyList) obj).get().size();
-			} else if (obj instanceof PyOldInstance) {
-				icon = 7;
-				size = Utils.getDict(obj).size();
-			} else if (obj instanceof PyString) {
-				icon = 9;
-			} else if (obj instanceof PyTuple) {
-				icon = 10;
-				size = ((PyTuple) obj).get().size();
-			} else if (obj instanceof PyTypeInstance) {
-				icon = 12;
-				size = Utils.getDict(obj).size();
-			}
-
-			// Set text
-			String title = obj.toString();
-			if (obj instanceof PyString) {
-				title = "\"" + title + "\"";
-			}
-
-			if (node.parent != null) {
-				title = node.parent.toString() + ": " + title;
-			}
-
-			// Set icon
-			if (size == 0) {
-				title += " (empty)";
-				icon++;
-			} else if (size > 0) {
-				title += " (" + size + " items)";
-			}
-
-			setText(title);
-			setIcon(ICONS[icon]);
-			this.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
-
+			node.onRender();
+			
+			setText("<html>" + node.getTitle() + "</html>");
+			setIcon(node.getIcon());
+			setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
+			
 			return this;
+		}
+	}
+
+	private class ItemMenu extends JPopupMenu {
+		private static final long serialVersionUID = -8532227199496399180L;
+		private JMenuItem printBtn = new JMenuItem("Print Address");
+		private JMenuItem updateBtn = new JMenuItem("Update");
+		private JCheckBoxMenuItem autoBtn = new JCheckBoxMenuItem("Auto Update");
+
+		public ItemMenu(ObjectNode obj) {
+			// TODO: Don't allow auto update if parent is update not a list/map/tuple
+			// TODO: Pre-select object if parent is auto
+			super();
+			add(updateBtn);
+			add(autoBtn);
+			add(new JSeparator());
+			add(printBtn);
+			
+			if (autoUpdateNodes.contains(obj)) {
+				autoBtn.setSelected(true);
+			}
+
+			printBtn.addActionListener(new ActionListener() {
+				public void actionPerformed(ActionEvent arg0) {
+					System.out.println(Long.toHexString(obj.getData().getAddress()));
+				}
+			});
+			
+			updateBtn.addActionListener(new ActionListener() {
+				public void actionPerformed(ActionEvent arg0) {
+					if (updateBtn.isEnabled()) {
+						obj.update();
+					}
+				}
+			});
+			
+			autoBtn.addItemListener(new ItemListener() {
+				public void itemStateChanged(ItemEvent arg0) {
+					if (autoBtn.isEnabled()) {
+						if (autoBtn.isSelected()) {
+							autoUpdateNodes.add(obj);
+						} else {
+							System.out.println("Removing");
+							autoUpdateNodes.remove(obj);
+						}
+					}
+				}
+			});
 		}
 	}
 }

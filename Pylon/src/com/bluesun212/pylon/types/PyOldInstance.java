@@ -1,6 +1,12 @@
 package com.bluesun212.pylon.types;
 
+import com.bluesun212.pylon.MemoryInterface;
+
 public abstract class PyOldInstance extends PyObject {
+	public PyOldInstance(MemoryInterface base, long address, PyType type) {
+		super(base, address, type);
+	}
+
 	protected PyOldClass classobj;
 	protected PyDict dict;
 	

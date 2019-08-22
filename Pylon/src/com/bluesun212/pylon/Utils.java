@@ -2,7 +2,7 @@ package com.bluesun212.pylon;
 
 import java.util.LinkedList;
 
-import com.bluesun212.pylon.MemoryReader;
+import com.bluesun212.pylon.MemoryInterface;
 import com.bluesun212.pylon.types.PyDict;
 import com.bluesun212.pylon.types.PyObject;
 import com.bluesun212.pylon.types.PyOldInstance;
@@ -19,13 +19,16 @@ public class Utils {
 	 * Finds a type by the given name in the program, and returns an object representing that type.
 	 * 
 	 * @param base the MemoryReader instance
-	 * @param typeAddress the address of the "type" type
 	 * @param name the type being looked for
 	 * @return the PyType object
 	 */
-	public static PyType getTypeByName(MemoryReader base, int typeAddress, String name) {
+	public static PyType getTypeByName(MemoryInterface base, String name) {
 		// Find all types, then find the one with the given name
-		LinkedList<Long> raw = base.scanFor(new int[]{typeAddress});
+		if (base.getBaseTypeAddress() == 0) {
+			throw new IllegalStateException("The base type address is not valid");
+		}
+		
+		LinkedList<Long> raw = base.scanFor(new int[]{(int) base.getBaseTypeAddress()});
 		
 		for (long addr : raw) {
 			PyObject typeObj = base.getObject(addr);
@@ -44,12 +47,15 @@ public class Utils {
 	 * Creates a list containing every defined type in the specified program.
 	 * 
 	 * @param base the MemoryReader instance
-	 * @param typeAddress the address of the "type" type
 	 * @return a list of addresses 
 	 */
-	public static LinkedList<PyType> getAllTypes(MemoryReader base, int typeAddress) {
+	public static LinkedList<PyType> getAllTypes(MemoryInterface base) {
 		// Find all types
-		LinkedList<Long> raw = base.scanFor(new int[]{typeAddress});
+		if (base.getBaseTypeAddress() == 0) {
+			throw new IllegalStateException("The base type address has is not valid");
+		}
+		
+		LinkedList<Long> raw = base.scanFor(new int[]{(int) base.getBaseTypeAddress()});
 		LinkedList<PyType> types = new LinkedList<PyType>();
 		
 		for (long addr : raw) {
@@ -62,7 +68,7 @@ public class Utils {
 		return types;
 	}
 	
-	public static LinkedList<PyObject> getAllInstancesEx(MemoryReader base, PyType type, ObjectFilter filter) {
+	public static LinkedList<PyObject> getAllInstancesEx(MemoryInterface base, PyType type, ObjectFilter filter) {
 		// Find all occurrences of the address in memory
 		LinkedList<Long> raw = base.scanFor(new int[]{(int) type.getAddress()});
 		LinkedList<PyObject> ret = new LinkedList<PyObject>();
@@ -80,7 +86,7 @@ public class Utils {
 		return ret;
 	}
 	
-	public static PyObject getFirstInstanceEx(MemoryReader base, PyType type, ObjectFilter filter) {
+	public static PyObject getFirstInstanceEx(MemoryInterface base, PyType type, ObjectFilter filter) {
 		// Find all occurrences of the address in memory
 		LinkedList<Long> raw = base.scanFor(new int[]{(int) type.getAddress()});
 		
@@ -96,11 +102,11 @@ public class Utils {
 		return null;
 	}
 	
-	public static PyObject getFirstInstance(MemoryReader base, PyType type) {
+	public static PyObject getFirstInstance(MemoryInterface base, PyType type) {
 		return getFirstInstanceEx(base, type, new PassAllFilter());
 	}
 	
-	public static LinkedList<PyObject> getAllInstances(MemoryReader base, PyType type) {
+	public static LinkedList<PyObject> getAllInstances(MemoryInterface base, PyType type) {
 		return getAllInstancesEx(base, type, new PassAllFilter());
 	}
 	

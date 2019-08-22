@@ -3,24 +3,26 @@ package com.bluesun212.pylon.python278;
 import java.util.LinkedList;
 import java.util.List;
 
-import com.bluesun212.pylon.MemoryReader;
-import com.bluesun212.pylon.MemoryReader.Buffer;
+import com.bluesun212.pylon.MemoryInterface;
+import com.bluesun212.pylon.MemoryInterface.Buffer;
 import com.bluesun212.pylon.types.PyList;
 import com.bluesun212.pylon.types.PyObject;
+import com.bluesun212.pylon.types.PyType;
 
 class Python278List extends PyList {
 	private LinkedList<Integer> addrList;
-	private MemoryReader mr;
 	
-	@Override
-	protected boolean read(MemoryReader mr, long address) {
-		this.mr = mr;
-		return update();
+	public Python278List(MemoryInterface base, long address, PyType type) {
+		super(base, address, type);
+		
+		if (!update()) {
+			throw new IllegalArgumentException("Invalid list");
+		}
 	}
 	
 	@Override
 	public int size() {
-		Buffer mem = mr.getBuffer();
+		Buffer mem = base.getBuffer();
 		int size = mem.read(address+8);
 		mem.unlock();
 		
@@ -30,7 +32,7 @@ class Python278List extends PyList {
 	@Override
 	public boolean update() {
 		// Read list size
-		Buffer mem = mr.getBuffer();
+		Buffer mem = base.getBuffer();
 		int size = size();
 		
 		// Read list address
@@ -61,7 +63,7 @@ class Python278List extends PyList {
 		
 		LinkedList<PyObject> list = new LinkedList<PyObject>();
 		for (int i = 0; i < addrList.size(); i++) {
-			list.add(mr.getObject(addrList.get(i)));
+			list.add(base.getObject(addrList.get(i)));
 		}
 		
 		return list;

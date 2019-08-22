@@ -10,13 +10,21 @@ import com.bluesun212.pylon.types.PyObject;
  * @author Jared Jonas
  *
  */
-public abstract class Reader {
-	protected MemoryReader mr;
+public abstract class PyInterface {
+	protected MemoryInterface base;
+	protected ObjectAllocator alloc;
+	protected ObjectFactory factory;
 	
-	public Reader(MemoryReader mr) {
-		this.mr = mr;
+	public PyInterface(MemoryInterface base) {
+		this.base = base;
+		createFactory();
 	}
 	
-	public abstract PyObject createTypeInstance(long address, String expectedType);
-	public abstract boolean readObjectHead(long address, PyObject inst);
+	public abstract PyObject getObject(long address);
+	public abstract boolean validateBaseType(long addr);
+	protected abstract void createFactory();
+
+	public ObjectFactory getFactory() {
+		return factory;
+	}
 }

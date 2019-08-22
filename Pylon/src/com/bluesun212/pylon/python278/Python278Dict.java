@@ -4,25 +4,26 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import com.bluesun212.pylon.MemoryReader;
-import com.bluesun212.pylon.MemoryReader.Buffer;
+import com.bluesun212.pylon.MemoryInterface;
+import com.bluesun212.pylon.MemoryInterface.Buffer;
+import com.bluesun212.pylon.MemoryInterface.ExtendedBuffer;
 import com.bluesun212.pylon.types.PyDict;
 import com.bluesun212.pylon.types.PyObject;
-import com.sun.jna.Memory;
+import com.bluesun212.pylon.types.PyType;
 
 class Python278Dict extends PyDict {
-	private MemoryReader mr;
+	public Python278Dict(MemoryInterface base, long address, PyType type) {
+		super(base, address, type);
+		
+		if (!update()) {
+			throw new IllegalArgumentException("Invalid dict");
+		}
+	}
 
 	@Override
-	protected boolean read(MemoryReader mr, long address) {
-		this.mr = mr;
-		return update();
-	}
-	
-	@Override
 	public int size() {
-		Buffer mem = mr.getBuffer();
-		int size = mem.read(address+16) * 12;
+		Buffer mem = base.getBuffer();
+		int size = mem.read(address+12);
 		mem.unlock();
 		
 		return size;
@@ -30,10 +31,9 @@ class Python278Dict extends PyDict {
 
 	@Override
 	public boolean update() {
-		int size = size();
-		
 		// Read table ptr
-		Buffer mem = mr.getBuffer();
+		Buffer mem = base.getBuffer();
+		int size = mem.read(address+16)+1;
 		int table = mem.read(address+20);
 		mem.unlock();
 		
@@ -46,22 +46,22 @@ class Python278Dict extends PyDict {
 		dict = new HashMap<Integer, Integer>();
 
 		if (size > 0) {
-			Memory m = mr.getExtendedBuffer(table+4, size);
+			ExtendedBuffer m = base.getExtendedBuffer(table, size*12);
 
-			for (int i = 0; i < size; i += 12) {
-				int theKey = m.getInt(i);
-				int theValue = m.getInt(i + 4);
+			for (int i = 0; i < size; i++) {
+				int theKey = m.getInt(i*12+4);
+				int theValue = m.getInt(i*12+8);
 
 				// Add to list
 				if (theKey != 0 && theValue != 0) {
 					dict.put(theKey, theValue);
 				}
 			}
-
-			return true;
+			
+			m.unlock();
 		}
-
-		return false;
+		
+		return true;
 	}
 
 	@Override
@@ -70,8 +70,8 @@ class Python278Dict extends PyDict {
 		
 		HashMap<PyObject, PyObject> objDict = new HashMap<PyObject, PyObject>();
 		for (Entry<Integer, Integer> pair : dict.entrySet()) {
-			PyObject key = mr.getObject(pair.getKey());
-			PyObject value = mr.getObject(pair.getValue());
+			PyObject key = base.getObject(pair.getKey());
+			PyObject value = base.getObject(pair.getValue());
 
 			if (key != null && value != null) {
 				objDict.put(key, value);
@@ -86,13 +86,45 @@ class Python278Dict extends PyDict {
 		update();
 		
 		for (Entry<Integer, Integer> pair : dict.entrySet()) {
-			PyObject key = mr.getObject(pair.getKey());
+			PyObject key = base.getObject(pair.getKey());
 
 			if (key != null && key.toString().equals(val)) {
-				return mr.getObject(pair.getValue());
+				return base.getObject(pair.getValue());
 			}
 		}
 
 		return null;
+	}
+
+	@Override
+	public PyObject[] getPyObject(String[] vals) {
+		update();
+		
+		PyObject[] ret = new PyObject[vals.length];
+		
+		for (Entry<Integer, Integer> pair : dict.entrySet()) {
+			PyObject key = base.getObject(pair.getKey());
+			
+			
+			if (key != null) {
+				int index = arrayIndexOf(vals, key.toString());
+				
+				if (index != -1) {
+					ret[index] = base.getObject(pair.getValue());
+				}
+			}
+		}
+
+		return ret;
+	}
+	
+	private int arrayIndexOf(String[] vals, String val) {
+		for (int i = 0; i < vals.length; i++) {
+			if (vals[i].equals(val)) {
+				return i;
+			}
+		}
+		
+		return -1;
 	}
 }

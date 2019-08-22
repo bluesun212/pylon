@@ -1,8 +1,6 @@
 package com.bluesun212.pylon;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -18,8 +16,18 @@ import com.sun.jna.platform.win32.WinNT.HANDLE;
 import com.sun.jna.platform.win32.WinNT.MEMORY_BASIC_INFORMATION;
 import com.sun.jna.ptr.IntByReference;
 
+/* TODO:
+ * Create a thread that monitors the memory regions in the process and updates the list
+ * Multi-thread scanning
+ * Remove reflection from getObject, speed it up
+ * Make type cache visible to MemoryReader
+ * 
+ * Rename this class
+ * Create memory management system for written types
+ */
+
 /**
- * The MemoryReader is the base class for Pylon. It attaches to the specified
+ * The MemoryInterface is the base class for Pylon. It attaches to the specified
  * process, and scans for user-specified data. In more detail, it does the
  * following: 1. Opens a process with the given PID, and obtains its handle 2.
  * Makes a list of all memory regions in the process (COMMIT + any variation of
@@ -28,25 +36,17 @@ import com.sun.jna.ptr.IntByReference;
  * 
  * @author Jared Jonas
  */
-public class MemoryReader {
+public class MemoryInterface {
 	private HANDLE proc;
+	private int procID;
 	private LinkedList<MemoryModel> regions;
-	private Reader reader;
+	private PyInterface pyInterface;
+	private MemoryAllocator alloc;
+	private long baseTypeAddr = 0;
+	private boolean baseTypeAddrValidated = false;
 
-	private static int bufferSize = 8;
+	private static int bufferSize = 32;
 	private Buffer[] buffers;
-	private int current;
-	private Object lock;
-	
-	private static final Method readMethod;
-	static {
-		try {
-			readMethod = PyObject.class.getDeclaredMethod("read", MemoryReader.class, long.class);
-			readMethod.setAccessible(true);
-		} catch (NoSuchMethodException | SecurityException e) {
-			throw new RuntimeException(e);
-		}
-	}
 
 	/**
 	 * Takes a string that matches the window's title and creates a MemoryReader
@@ -56,11 +56,11 @@ public class MemoryReader {
 	 *            a string matching the window's title
 	 * @return a MemoryReader instance
 	 */
-	public static MemoryReader attach(String window) {
+	public static MemoryInterface attach(String window) {
 		IntByReference ibr = new IntByReference();
 		HWND hwnd = User32.INSTANCE.FindWindow(null, window);
 		User32.INSTANCE.GetWindowThreadProcessId(hwnd, ibr);
-		return new MemoryReader(ibr.getValue());
+		return new MemoryInterface(ibr.getValue());
 	}
 
 	/**
@@ -70,11 +70,11 @@ public class MemoryReader {
 	 *            the PID
 	 * @return a MemoryReader instance
 	 */
-	public static MemoryReader attach(int processId) {
-		return new MemoryReader(processId);
+	public static MemoryInterface attach(int processId) {
+		return new MemoryInterface(processId);
 	}
 
-	private MemoryReader(int processId) {
+	private MemoryInterface(int processId) {
 		// Get min/max application addresses
 		SYSTEM_INFO info = new SYSTEM_INFO();
 		Kernel32.INSTANCE.GetSystemInfo(info);
@@ -82,8 +82,10 @@ public class MemoryReader {
 		long max = Pointer.nativeValue(info.lpMaximumApplicationAddress);
 
 		// Open child process
-		proc = Kernel32.INSTANCE.OpenProcess(Kernel32.PROCESS_QUERY_INFORMATION | Kernel32.PROCESS_VM_READ, false,
-				processId);
+		procID = processId;
+		
+		int rights = Kernel32.PROCESS_VM_OPERATION|Kernel32.PROCESS_VM_WRITE|Kernel32.PROCESS_VM_READ|Kernel32.PROCESS_QUERY_INFORMATION;
+		proc = Kernel32.INSTANCE.OpenProcess(rights, false, processId);
 
 		// Start going through memory pages
 		regions = new LinkedList<MemoryModel>();
@@ -114,9 +116,16 @@ public class MemoryReader {
 		for (int i = 0; i < bufferSize; i++) {
 			buffers[i] = new Buffer();
 		}
-
-		lock = new Object();
-		current = 0;
+		
+		alloc = new MemoryAllocator(this);
+	}
+	
+	public int getProcessID() {
+		return procID;
+	}
+	
+	public HANDLE getProcessHandle() {
+		return proc;
 	}
 
 	/**
@@ -126,17 +135,48 @@ public class MemoryReader {
 	 *            the reader class
 	 * @return whether the call succeeded
 	 */
-	public boolean createReader(Class<? extends Reader> version) {
+	public boolean setVersion(Class<? extends PyInterface> version) {
 		try {
-			Constructor<? extends Reader> ctor = version.getDeclaredConstructor(MemoryReader.class);
+			Constructor<? extends PyInterface> ctor = version.getDeclaredConstructor(MemoryInterface.class);
 			ctor.setAccessible(true);
-
-			reader = ctor.newInstance(this);
+			pyInterface = ctor.newInstance(this);
+			
+			// Just in case setBaseTypeAddress was called before this function
+			setBaseTypeAddress(baseTypeAddr);
 			return true;
-		} catch (Exception e) {
-			reader = null;
+		} catch (Exception e) { // TODO: Bad Jared
+			e.printStackTrace();
+			pyInterface = null;
 			return false;
 		}
+	}
+	
+	/**
+	 * Sets and validates the base type address.  This is the address
+	 * in process memory where the base type is located.  The base type
+	 * is the type of type objects.
+	 * 
+	 * @param baseTypeAddr the address pointing to the base type
+	 * @return whether the validation succeeded
+	 */
+	public boolean setBaseTypeAddress(long baseTypeAddr) {
+		this.baseTypeAddr = baseTypeAddr;
+		baseTypeAddrValidated = false;
+		
+		if (pyInterface != null && pyInterface.validateBaseType(baseTypeAddr)) {
+			baseTypeAddrValidated = true;
+		}
+		
+		return baseTypeAddrValidated;
+	}
+	
+	/**
+	 * 
+	 * 
+	 * @return the base type address, or 0 if not validated
+	 */
+	public long getBaseTypeAddress() {
+		return baseTypeAddrValidated ? baseTypeAddr : 0;
 	}
 
 	/**
@@ -173,63 +213,40 @@ public class MemoryReader {
 	}
 	
 	public PyObject getObject(long address) {
-		return getObject(address, null);
-	}
-
-	public PyObject getObject(long address, String expectedType) {
-		// Instantiate object
-		PyObject inst = reader.createTypeInstance(address, expectedType);
-		if (inst == null) {
-			return null;
+		if (!baseTypeAddrValidated) {
+			throw new IllegalStateException("The base type address has not been validated yet");
 		}
-
+		
 		try {
-			// Set the object
-			// TODO: Combine these into one function
-			boolean success = reader.readObjectHead(address, inst);
-			if (success) {
-				success &= (boolean) readMethod.invoke(inst, this, address);
-			}
-
-			// The object wasn't valid, fail silently, otherwise return
-			if (success) {
-				return inst;
-			}
-		} catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
-				| SecurityException e) {
-			// Something didn't work with the reflection (which is unusual), so
-			// raise a RuntimeException
-			throw new RuntimeException(e);
-		}
-
+			return pyInterface.getObject(address);
+		} catch (IllegalArgumentException e) {}
+		
 		return null;
+	}
+	
+	public ObjectFactory getFactory() {
+		return pyInterface.getFactory();
+	}
+	
+	public MemoryAllocator getMemoryAllocator() {
+		return alloc;
 	}
 
 	public Buffer getBuffer() {
-		synchronized (lock) {
-			// Find an unused buffer
-			int old = current;
-
-			do {
-				current = (current + 1) % buffers.length;
-			} while (buffers[current].lock.get() && current != old);
-
-			// If all are used, create a new one
-			Buffer b = buffers[current];
-			if (current == old) {
-				System.err.println("New buffer created");
-				new Throwable().printStackTrace(System.err);
-				b = new Buffer();
+		for (int i = 0; i < buffers.length; i++) {
+			if (!buffers[i].lock.get()) {
+				buffers[i].lock.set(true);
+				return buffers[i];
 			}
-
-			// Lock and return
-			b.lock.set(true);
-			return b;
 		}
+		
+		// Don't bother locking the buffer, since it's not used in the array
+		System.err.println("Creating new buffer in getBuffer()");
+		return new Buffer();
 	}
 
-	public Memory getExtendedBuffer(long address, int size) {
-		Memory buffer = new Memory(size);
+	public ExtendedBuffer getExtendedBuffer(long address, int size) {
+		ExtendedBuffer buffer = new ExtendedBuffer(size);
 		Kernel32.INSTANCE.ReadProcessMemory(proc, Pointer.createConstant(address), buffer, size, null);
 		return buffer;
 	}
@@ -284,14 +301,24 @@ public class MemoryReader {
 			Kernel32.INSTANCE.ReadProcessMemory(proc, Pointer.createConstant(address), back, 4, null);
 			return back.getInt(0);
 		}
+		
+		public void write(long address, int data) {
+			back.setInt(0, data);
+			Kernel32.INSTANCE.WriteProcessMemory(proc, Pointer.createConstant(address), back, 4, null);
+		}
 
 		public void unlock() {
 			lock.set(false);
 		}
+	}
+	
+	public class ExtendedBuffer extends Memory {
+		public ExtendedBuffer(int size) {
+			super(size);
+		}
 		
-		@Override
-		protected void finalize() {
-			unlock();
+		public void unlock() {
+			dispose();
 		}
 	}
 
@@ -328,7 +355,7 @@ public class MemoryReader {
 			for (int i = 1; i < vals.length; i++) {
 				for (int x = 0; x < arr.length; x++) {
 					if (arr[x] == vals[i]) {
-						ret.add(Pointer.nativeValue(address) + i * 4 - 4);
+						ret.add(Pointer.nativeValue(address) + i * 4 - 4); // TODO: Decide on whether this should be -4
 						break;
 					}
 				}
